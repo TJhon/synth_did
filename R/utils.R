@@ -25,7 +25,7 @@ pairwise.sum.decreasing = function(x, y) {
 #' at all times, and all treated units must begin treatment simultaneosly. This function
 #' creates num.units x num.time.periods matrices Y and W of outcomes and treatment indicators.
 #' In these matrices, columns are sorted by time, and by default (when treated.last=TRUE),
-#' rows for control units appear before those of treated units. 
+#' rows for control units appear before those of treated units.
 #'
 #' @param panel A data.frame with columns consisting of units, time, outcome, and treatment indicator.
 #' @param unit The column number/name corresponding to the unit identifier. Default is 1.
@@ -62,7 +62,26 @@ panel.matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4,
   treatment = index.to.name(treatment)
   keep = c(unit, time, outcome, treatment)
 
-  panel = panel[keep]
+  panel = panel[keep] |>
+    rename(unit = 1, time = 2, outcome = 3, treatment = 4) |>
+    # panel |>
+    group_by(unit) |>
+    mutate(
+      treated = max(treatment),
+      ty = ifelse(treatment == 1, time, NA),
+      tyear = ifelse(treated == 1, min(ty, na.rm = T), NA)
+    ) |>
+    arrange(unit, time) |>
+    ungroup() |>
+    mutate(
+      across(c(ty, tyear), replace_na, 0),
+    # Convert potential factor/date columns to character
+      across(where(is.factor), as.character)
+      ) |>
+    as.data.frame()
+  break_points <- panel |> pull(tyear) |> sort() |> unique()
+  break_points <- break_points[-1]
+  unit = "unit"; time = "time"; treatment = "treatment"; outcome = "outcome"
   if (!is.data.frame(panel)){
     stop("Unsupported input type `panel.`")
   }
@@ -75,10 +94,7 @@ panel.matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4,
   if (!all(panel[, treatment] %in% c(0, 1))) {
     stop("The treatment status should be in 0 or 1.")
   }
-  # Convert potential factor/date columns to character
-  panel = data.frame(
-    lapply(panel, function(col) {if (is.factor(col) || inherits(col, "Date")) as.character(col) else col}), stringsAsFactors = FALSE
-  )
+
   val <- as.vector(table(panel[, unit], panel[, time]))
   if (!all(val == 1)) {
     stop("Input `panel` must be a balanced panel: it must have an observation for every unit at every time.")
@@ -100,7 +116,10 @@ panel.matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4,
   }
 
   unit.order = if(treated.last) { order(W[,T0+1], rownames(Y)) } else { 1:nrow(Y) }
-  list(Y = Y[unit.order, ], N0 = N0, T0 = T0, W = W[unit.order, ])
+  tau_wt <- (num.units - N0) * (num.years - T0)
+  setup <- list(Y = Y[unit.order, ], N0 = N0, T0 = T0, W = W[unit.order, ], panel_ref = panel, break_points = break_points, tau_wt = tau_wt)
+
+  return(setup)
 }
 
 #' Get timesteps from panel matrix Y
@@ -108,7 +127,7 @@ panel.matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4,
 #' timesteps are stored as colnames(Y), but column names cannot be Date objects.
 #' Instead, we use strings. If they are strings convertible to dates, return that
 #'
-#' @param Y a matrix 
+#' @param Y a matrix
 #' @return its column names interpreted as Dates if possible
 #' @export
 timesteps = function(Y) {
