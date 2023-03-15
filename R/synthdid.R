@@ -106,6 +106,39 @@ synthdid_estimate <- function(Y, N0, T0, X = array(dim = c(dim(Y), 0)),
   return(estimate)
 }
 
+
+staggered_synthdid <- function(all_setup){
+  if(is.null(all_setup$tau_wt)){
+    stop("all_setup, from panel_matrices() -> list")
+  }
+
+  tau_wt <- all_setup$tau_wt
+  setup_time <- all_setup[1:(length(all_setup) - 1)]
+
+  all_att <- function(time, setup){
+    att <- synthdid_estimate(setup[[time]]$Y, setup[[time]]$N0, setup[[time]]$T0)
+    return(att)
+  }
+
+  break_times <- setup_time |> names()
+
+  all_att(break_times[1], setup_time)
+
+  # setup_time[[break_times[1]]]$Y
+  tau <- map(break_times, all_att, setup_time)
+
+  tau_dbl <- tau |> map_dbl(as.double)
+
+  tau_wt_time <- tau_wt / sum(tau_wt)
+  att <- tau_dbl %*% tau_wt_time |> as.double()
+
+  info_tau <- tibble(time = break_times, tau_wt_time, tau_dbl)
+
+  # print(att)
+  all_info <- list(att = att, info_tau = info_tau, tau_time <- tau)
+  return(all_info)
+}
+
 #' synthdid_estimate for synthetic control estimates.
 #' Takes all the same parameters, but by default, passes options to use the synthetic control estimator
 #' By default, this uses only 'infinitesimal' ridge regularization when estimating the weights.
