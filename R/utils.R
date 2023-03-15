@@ -42,84 +42,102 @@ pairwise.sum.decreasing = function(x, y) {
 #' data("california_prop99")
 #' # Transform to N*T matrix format required for synthdid,
 #' # where N is the number of units and T the time periods.
-#' setup <- panel.matrices(california_prop99, unit = 1, time = 2, outcome = 3, treatment = 4)
+#' setup <- panel_matrices(california_prop99, unit = 1, time = 2, outcome = 3, treatment = 4)
 #'
 #' # Compute synthdid estimate
 #' synthdid_estimate(setup$Y, setup$N0, setup$T0)
+#' setup_all <- panel_matrices(haven::read_dta("https://github.com/d2cml-ai/synthdid/blob/stata_review/vignettes/data/quota.dta?raw=true"), "country", "year", "womparl", "quota")
 #' }
 #'
 #' @export
-panel.matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4, treated.last = TRUE) {
+panel_matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4, treated.last = TRUE) {
   # TODO: add support for covariates X, i.e. could keep all other columns
   keep = c(unit, time, outcome, treatment)
   if (!all(keep %in% 1:ncol(panel) | keep %in% colnames(panel))) {
     stop("Column identifiers should be either integer or column names in `panel`.")
   }
-  index.to.name = function(x) { if(x %in% 1:ncol(panel)) { colnames(panel)[x] } else { x } }
-  unit = index.to.name(unit)
-  time = index.to.name(time)
-  outcome = index.to.name(outcome)
-  treatment = index.to.name(treatment)
-  keep = c(unit, time, outcome, treatment)
 
-  panel = panel[keep] |>
-    rename(unit = 1, time = 2, outcome = 3, treatment = 4) |>
-    # panel |>
+  if(typeof(unit) == "character"){
+    panel <- panel |> select(all_of(c(unit, time, outcome, treatment)))
+  }else{
+    panel <- panel[, c(unit, time, outcome, treatment)]
+  }
+  panel <- panel |> rename(unit = 1, time = 2, outcome = 3, treatment = 4)
+  unit = "unit"; time = "time"; outcome = "outcome"; treatment = "treatment"
+
+  data_0 <-
+    panel |>
     group_by(unit) |>
     mutate(
       treated = max(treatment),
       ty = ifelse(treatment == 1, time, NA),
       tyear = ifelse(treated == 1, min(ty, na.rm = T), NA)
     ) |>
-    arrange(unit, time) |>
     ungroup() |>
-    mutate(
-      across(c(ty, tyear), replace_na, 0),
-    # Convert potential factor/date columns to character
-      across(where(is.factor), as.character)
-      ) |>
-    as.data.frame()
-  break_points <- panel |> pull(tyear) |> sort() |> unique()
+    arrange(treated, unit, time) |>
+    # mutate(across(c(ty, tyear), replace_na, 0)) |>
+    mutate(across(where(is.numeric), replace_na, 0))
+  break_points <- data_0 |> pull(tyear) |> sort() |> unique()
   break_points <- break_points[-1]
-  unit = "unit"; time = "time"; treatment = "treatment"; outcome = "outcome"
-  if (!is.data.frame(panel)){
-    stop("Unsupported input type `panel.`")
-  }
-  if (anyNA(panel)) {
-    stop("Missing values in `panel`.")
-  }
-  if (length(unique(panel[, treatment])) == 1) {
-    stop("There is no variation in treatment status.")
-  }
-  if (!all(panel[, treatment] %in% c(0, 1))) {
-    stop("The treatment status should be in 0 or 1.")
-  }
+  # panel.matrices()
+  get_panel <- function(panel){
+    if (!is.data.frame(panel)){
+      stop("Unsupported input type `panel.`")
+    }
 
-  val <- as.vector(table(panel[, unit], panel[, time]))
-  if (!all(val == 1)) {
-    stop("Input `panel` must be a balanced panel: it must have an observation for every unit at every time.")
+    if (anyNA(panel)) {
+      stop("Missing values in `panel`.")
+    }
+
+    if (length(unique(panel[, treatment])) == 1) {
+      stop("There is no variation in treatment status.")
+    }
+    if (!all(panel[, treatment] %in% c(0, 1))) {
+      stop("The treatment status should be in 0 or 1.")
+    }
+
+    val <- as.vector(table(panel[, unit], panel[, time]))
+    if (!all(val == 1)) {
+      stop("Input `panel` must be a balanced panel: it must have an observation for every unit at every time.")
+    }
+    panel = panel[order(panel[, unit], panel[, time]), ]
+    num.years = length(unique(panel[, time]))
+    num.units = length(unique(panel[, unit]))
+    Y = matrix(panel[,outcome], num.units, num.years, byrow = TRUE,
+               dimnames = list(unique(panel[,unit]), unique(panel[,time])))
+    W = matrix(panel[,treatment], num.units, num.years, byrow = TRUE,
+               dimnames = list(unique(panel[,unit]), unique(panel[,time])))
+    w = apply(W, 1, any)                         # indicator for units that are treated at any time
+    T0 = unname(which(apply(W, 2, any))[1]-1)    # last period nobody is treated
+    N0 = sum(!w)
+
+    # if(! (all(W[!w,] == 0) && all(W[,1:T0] == 0) && all(W[w, (T0+1):ncol(Y)]==1))) {
+    #   stop("The package cannot use this data. Treatment adoption is not simultaneous.")
+    # }
+
+    unit.order = if(treated.last) { order(W[,T0+1], rownames(Y)) } else { 1:nrow(Y) }
+    list(Y = Y[unit.order, ], N0 = N0, T0 = T0, W = W[unit.order, ])
+
   }
-
-  panel = panel[order(panel[, unit], panel[, time]), ]
-  num.years = length(unique(panel[, time]))
-  num.units = length(unique(panel[, unit]))
-  Y = matrix(panel[,outcome], num.units, num.years, byrow = TRUE,
-             dimnames = list(unique(panel[,unit]), unique(panel[,time])))
-  W = matrix(panel[,treatment], num.units, num.years, byrow = TRUE,
-             dimnames = list(unique(panel[,unit]), unique(panel[,time])))
-  w = apply(W, 1, any)                         # indicator for units that are treated at any time
-  T0 = unname(which(apply(W, 2, any))[1]-1)    # last period nobody is treated
-  N0 = sum(!w)
-
-  if(! (all(W[!w,] == 0) && all(W[,1:T0] == 0) && all(W[w, (T0+1):ncol(Y)]==1))) {
-    stop("The package cannot use this data. Treatment adoption is not simultaneous.")
+  multiple_breaks <- function(data_ref, b_p){
+    panel <- data_ref |> filter(tyear %in% c(b_p, 0)) |>
+      select(unit, time, outcome, treatment) |>
+      as.data.frame() |>
+      get_panel()
+    nt <- dim(panel$Y)
+    panel$weight_mult <- nt - c(panel$N0,  panel$T0)
+    panel$tau_wt <- panel$weight_mult[1] * panel$weight_mult[2]
+    return(panel)
   }
-
-  unit.order = if(treated.last) { order(W[,T0+1], rownames(Y)) } else { 1:nrow(Y) }
-  tau_wt <- (num.units - N0) * (num.years - T0)
-  setup <- list(Y = Y[unit.order, ], N0 = N0, T0 = T0, W = W[unit.order, ], panel_ref = panel, break_points = break_points, tau_wt = tau_wt)
-
-  return(setup)
+  if(length(break_points) < 2){
+    print("b")
+    return(get_panel(panel))
+  } else{ # Treatment adoption is not simultaneous.
+    all_setup <- map(break_points, multiple_breaks, data = data_0)
+    names(all_setup) <- break_points
+    all_setup$tau_wt <- map_dbl(all_setup, pluck, "tau_wt")
+    return(all_setup)
+  }
 }
 
 #' Get timesteps from panel matrix Y
