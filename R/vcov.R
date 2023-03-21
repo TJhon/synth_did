@@ -78,10 +78,10 @@ jackknife_se = function(estimate, weights = attr(estimate, 'weights')) {
     }
     if (setup$N0 == nrow(setup$Y) - 1 || (!is.null(weights) && sum(weights$omega != 0) == 1)) { return(NA) }
     theta = function(ind) {
-	weights.jk = weights
-	if (!is.null(weights)) { weights.jk$omega = sum_normalize(weights$omega[ind[ind <= setup$N0]]) }
-	estimate.jk = do.call(synthdid_estimate,
-	    c(list(Y=setup$Y[ind, ], N0=sum(ind <= setup$N0), T0=setup$T0, X = setup$X[ind, , ], weights = weights.jk), opts))
+    	weights.jk = weights
+    	if (!is.null(weights)) { weights.jk$omega = sum_normalize(weights$omega[ind[ind <= setup$N0]]) }
+    	estimate.jk = do.call(synthdid_estimate,
+    	    c(list(Y=setup$Y[ind, ], N0=sum(ind <= setup$N0), T0=setup$T0, X = setup$X[ind, , ], weights = weights.jk), opts))
     }
     jackknife(1:nrow(setup$Y), theta)
 }
@@ -112,9 +112,9 @@ placebo_se = function(estimate, replications) {
     N1 = nrow(setup$Y) - setup$N0
     if (setup$N0 <= N1) { stop('must have more controls than treated units to use the placebo se') }
     theta = function(ind) {
-	N0 = length(ind)-N1
-	weights.boot = weights
-	weights.boot$omega = sum_normalize(weights$omega[ind[1:N0]])
+    	N0 = length(ind)-N1
+    	weights.boot = weights
+    	weights.boot$omega = sum_normalize(weights$omega[ind[1:N0]])
         do.call(synthdid_estimate, c(list(Y=setup$Y[ind,], N0=N0,  T0=setup$T0,  X=setup$X[ind, ,], weights=weights.boot), opts))
     }
     sqrt((replications-1)/replications) * sd(replicate(replications, theta(sample(1:setup$N0))))
