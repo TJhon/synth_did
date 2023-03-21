@@ -46,11 +46,11 @@ pairwise.sum.decreasing = function(x, y) {
 #'
 #' # Compute synthdid estimate
 #' synthdid_estimate(setup$Y, setup$N0, setup$T0)
-#' setup_all <- panel_matrices(haven::read_dta("https://github.com/d2cml-ai/synthdid/blob/stata_review/vignettes/data/quota.dta?raw=true"), "country", "year", "womparl", "quota")
+#' setup_all <- panel.matrices(haven::read_dta("https://github.com/d2cml-ai/synthdid/blob/stata_review/vignettes/data/quota.dta?raw=true"), "country", "year", "womparl", "quota")
 #' }
 #'
 #' @export
-panel_matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4, treated.last = TRUE) {
+panel.matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4, treated.last = TRUE) {
   # TODO: add support for covariates X, i.e. could keep all other columns
   keep = c(unit, time, outcome, treatment)
   if (!all(keep %in% 1:ncol(panel) | keep %in% colnames(panel))) {
@@ -116,17 +116,19 @@ panel_matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4,
     # }
 
     unit.order = if(treated.last) { order(W[,T0+1], rownames(Y)) } else { 1:nrow(Y) }
-    list(Y = Y[unit.order, ], N0 = N0, T0 = T0, W = W[unit.order, ])
+    list(Y = Y[unit.order, ], N0 = N0, T0 = T0, W = W[unit.order, ], data_ref  = panel)
 
   }
-  multiple_breaks <- function(data_ref, b_p){
-    panel <- data_ref |> filter(tyear %in% c(b_p, 0)) |>
+  multiple_breaks <- function(data_ref1, b_p){
+    data_ref <- data_ref1 |> filter(tyear %in% c(b_p, 0)) |>
       select(unit, time, outcome, treatment) |>
-      as.data.frame() |>
+      as.data.frame()
+    panel <- data_ref |>
       get_panel()
     nt <- dim(panel$Y)
     panel$weight_mult <- nt - c(panel$N0,  panel$T0)
     panel$tau_wt <- panel$weight_mult[1] * panel$weight_mult[2]
+    panel$data_ref <- data_ref1
     return(panel)
   }
   if(length(break_points) < 2){
@@ -136,6 +138,7 @@ panel_matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4,
     all_setup <- map(break_points, multiple_breaks, data = data_0)
     names(all_setup) <- break_points
     all_setup$tau_wt <- map_dbl(all_setup, pluck, "tau_wt")
+    # all_setup$data_ref <- data_0
     return(all_setup)
   }
 }
