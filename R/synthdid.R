@@ -132,10 +132,10 @@ staggered_synthdid <- function(all_setup){
   tau_wt_time <- tau_wt / sum(tau_wt)
   att <- tau_dbl %*% tau_wt_time |> as.double()
 
-  info_tau <- tibble(time = break_times, tau_wt_time, tau_dbl)
+  info_tau <- tibble(time = break_times, tau_wt_time, tau_dbl, tau_wt)
 
   # print(att)
-  all_info <- list(att = att, info_tau = info_tau, tau_time <- tau)
+  all_info <- list(att = att, info_tau = info_tau, tau_time = tau)
   return(all_info)
 }
 
