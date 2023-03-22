@@ -3,18 +3,15 @@
 # https://github.com/d2cml-ai/synthdid/blob/stata_review/vignettes/data/quota_example.csv
 librarian::shelf(tidyverse, synthdid, haven)
 
+dir("R", pattern = "utils|solver|vcov|synthdid.R", full.names = T) |> map(source)
+
 quota <- read_dta("https://github.com/d2cml-ai/synthdid/blob/stata_review/vignettes/data/quota.dta?raw=true")
-quota_sample <- read_csv("https://github.com/d2cml-ai/synthdid/raw/stata_review/vignettes/data/quota_example.csv", show_col_types = F)
+# quota_sample <- read_csv("https://github.com/d2cml-ai/synthdid/raw/stata_review/vignettes/data/quota_example.csv", show_col_types = F)
 
-ss <- quota_sample |>
-  rename(unit = 1, time = 2, outcome = 3, quota = 4) |>
-  select(1:4)
+# data <- quota_sample |>
+#   rename(unit = 1, time = 2, outcome = 3, quota = 4) |>
+#   select(1:4)
 
-ss |>
-  select(1:3) |>
-  pivot_wider(names_from = time, values_from = outcome, values_fill = 0) |>
-  pivot_longer(!unit, values_to = "outcome", names_to = "time", names_transform = as.numeric) |>
-  left_join(ss) |> mutate(across(where(is.numeric), replace_na, 0))
 
 
 panel_matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4, treated.last = TRUE) {
@@ -107,41 +104,107 @@ panel_matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4,
     return(all_setup)
   }
 }
-quota_setup <- panel_matrices(quota, "country", "year", "womparl", "quota") -> s2
+
+# drop if country=="Algeria" | country=="Kenya" | country=="Samoa" |
+#   > country=="Swaziland" | country=="Tanzania"
 
 
-if(is.null(quota_setup$tau_wt)){
-  stop()
+quota1 <- quota |> filter(!(country %in% c("Algeria", "Kenya", "Samoa", "Swaziland", "Tanzania")))
+
+quota_setup <- panel.matrices(quota1, "country", "year", "womparl", "quota") -> s2
+
+att <- staggered_synthdid(quota_setup)
+
+att_weight <- attr(att[[3]][[2]], "weight")
+att_omega1 <- att_weight$omega
+att_lambda1 <- att_weight$lambda
+
+
+setup_1 <- quota1 |> filter(country!=country[10]) |> panel.matrices("country", "year", "womparl", "quota")
+
+synthdid_estimate(setup_1[[1]]$Y, setup_1[[1]]$N0, setup_1[[1]]$T0, weights = att_weight)
+
+
+nice <- function(){
+  att_se_2 <- function(variables) {
+
+    s1 <- att$tau_time[[2]]
+
+    setup <- attr(s1, "setup")
+    weight <- attr(s1, "weight")
+    weight$lambda
+    weight$omega
+    dim_y <- dim(setup$Y)
+    Y <- setup$Y[-dim_y[1], ] # porque estoy evaluando la ultima unidad de tratamiento, recordar que sdid de stata es una de O^4,
+
+    omega_aux <- sum_normalize(weight$omega)
+    lambda_aux <- weight$lambda
+
+
+    N1 <- dim_y - c(length(omega_aux) + 1, length(lambda_aux))
+
+    att_se <-  t(c(-omega_aux, rep(1 / N1[1], N1[1]))) %*% (Y) %*% c(-lambda_aux, rep(1 / N1[2], N1[2]))
+  }
+
+  tau_aux <- (c(att$tau_time[[1]] |> as.numeric(), att_se))
+
+  tau_wt_aux <- c(att$info_tau$tau_wt[1], prod(N1))
+
+  tau_wt_aux <- tau_wt_aux / sum(tau_wt_aux)
+
+
+  tau_aux %*% tau_wt_aux # 6.967746483 1.601097026 ATT_aux
+
 }
 
-tau_wt <- quota_setup$tau_wt
-setup_time <- quota_setup[1:(length(quota_setup) - 1)]
+country <- quota1$country |> unique()
+# quota $country |> unique()
 
-all_att <- function(time, setup){
-  att <- synthdid_estimate(setup[[time]]$Y, setup[[time]]$N0, setup[[time]]$T0)
-  return(att)
+set2 <- quota1 |> filter(country!=country[10]) |> panel.matrices("country", "year", "womparl", "quota")
+
+s1 <- att$tau_time[[1]]
+
+setup <- attr(s1, "setup")
+weight <- attr(s1, "weight")
+N1 <- setup$Y |> dim() - c(length(omega_aux) + 1, length(lambda_aux))
+t(c(-weight$omega, rep(1 / 2, 2))) %*% (setup$Y) %*% c(-weight$lambda, rep(1 / 14, 14))
+
+
+attr(att$tau_time[[1]], "weight")$lambda
+
+rownames(set2[[2]]$Y)
+setup$Y |> rownames()
+
+tau_eval <- function(tau_n){
+
+  att1 <- att$tau_time[[tau_n]]
+
+  setup_tau <- attr(att1, "setup")
+
+  Y_tau <- setup_tau$Y
+  N1 <- setup_tau$N0
+  T1 <- setup_tau$T0
+
+  unit_drop <- nrow(Y_tau)
+
+  ss <- c()
+  for (i in 1:unit_drop) {
+    # print(i)
+    eval <- synthdid_estimate(Y_tau[-i, ], N1, T1)
+    ss[i] <- eval |> as.numeric()
+  }
+  return(ss)
 }
 
-break_times <- setup_time |> names()
-
-all_att(break_times[1], setup_time)
-
-# setup_time[[break_times[1]]]$Y
-tau <- map(break_times, all_att, setup_time)
-
-tau_dbl <- tau |> map_dbl(as.double)
-
-tau_wt_time <- tau_wt / sum(tau_wt)
-att <- tau_dbl %*% tau_wt_time |> as.double()
-
-info_tau <- tibble(time = break_times, tau_wt_time, tau_dbl)
-
-print(att)
-
-return(list(att = att, info_tau = info_tau, tau_time <- tau))
+s1 <- tau_eval(1)
+s2 <- tau_eval(2)
 
 
-info <- staggered_synthdid(quota_setup)
-info |> glimpse()
+s2
 
-info$att
+
+synthdid_estimate(Y_tau[-1, ], N1, T1)
+
+
+vcov(att$tau_time[[1]], method = "jackknife")
+vcov(att$tau_time[[2]], method = "jackknife")

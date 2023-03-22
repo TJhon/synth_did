@@ -50,18 +50,18 @@ bootstrap_sample = function(estimate, replications) {
     weights = attr(estimate, 'weights')
     if (setup$N0 == nrow(setup$Y) - 1) { return(NA) }
     theta = function(ind) {
-	if(all(ind <= setup$N0) || all(ind > setup$N0)) { NA }
-	else {
-	    weights.boot = weights
-	    weights.boot$omega = sum_normalize(weights$omega[sort(ind[ind <= setup$N0])])
-	    do.call(synthdid_estimate, c(list(Y=setup$Y[sort(ind),], N0=sum(ind <= setup$N0), T0=setup$T0, X=setup$X[sort(ind), ,], weights=weights.boot), opts))
-	}
+    	if(all(ind <= setup$N0) || all(ind > setup$N0)) { NA }
+    	else {
+  	    weights.boot = weights
+  	    weights.boot$omega = sum_normalize(weights$omega[sort(ind[ind <= setup$N0])])
+  	    do.call(synthdid_estimate, c(list(Y=setup$Y[sort(ind),], N0=sum(ind <= setup$N0), T0=setup$T0, X=setup$X[sort(ind), ,], weights=weights.boot), opts))
+    	}
     }
     bootstrap.estimates = rep(NA, replications)
     count = 0
     while(count < replications) {
-	bootstrap.estimates[count+1] = theta(sample(1:nrow(setup$Y), replace=TRUE))
-	if(!is.na(bootstrap.estimates[count+1])) { count = count+1 }
+    	bootstrap.estimates[count+1] = theta(sample(1:nrow(setup$Y), replace=TRUE))
+    	if(!is.na(bootstrap.estimates[count+1])) { count = count+1 }
     }
     bootstrap.estimates
 }
@@ -117,7 +117,7 @@ placebo_se = function(estimate, replications) {
     	weights.boot$omega = sum_normalize(weights$omega[ind[1:N0]])
         do.call(synthdid_estimate, c(list(Y=setup$Y[ind,], N0=N0,  T0=setup$T0,  X=setup$X[ind, ,], weights=weights.boot), opts))
     }
-    sqrt((replications-1)/replications) * sd(replicate(replications, theta(sample(1:setup$N0))))
+    sqrt((replications-1)/replications) * sd(replicate(replications, theta(sample(1:setup$N0)), na.rm =F))
 }
 
 sum_normalize = function(x) {

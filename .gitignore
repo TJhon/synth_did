@@ -8,6 +8,7 @@
 *.nav
 *.snm
 *.pdf
+*.dta
 !figures/*.pdf
 !talks/MSR_sept2016/figures/*.pdf
 !literature/*.pdf

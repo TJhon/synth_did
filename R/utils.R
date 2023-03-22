@@ -132,7 +132,7 @@ panel.matrices = function(panel, unit = 1, time = 2, outcome = 3, treatment = 4,
     return(panel)
   }
   if(length(break_points) < 2){
-    print("b")
+    # print("b")
     return(get_panel(panel))
   } else{ # Treatment adoption is not simultaneous.
     all_setup <- map(break_points, multiple_breaks, data = data_0)
