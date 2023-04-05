@@ -117,7 +117,7 @@ placebo_se = function(estimate, replications) {
     	weights.boot$omega = sum_normalize(weights$omega[ind[1:N0]])
         do.call(synthdid_estimate, c(list(Y=setup$Y[ind,], N0=N0,  T0=setup$T0,  X=setup$X[ind, ,], weights=weights.boot), opts))
     }
-    sqrt((replications-1)/replications) * sd(replicate(replications, theta(sample(1:setup$N0)), na.rm =F))
+    sqrt((replications-1)/replications) * sd(replicate(replications, theta(sample(1:setup$N0))), na.rm =F)
 }
 
 sum_normalize = function(x) {
