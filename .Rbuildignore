@@ -1,11 +1,7 @@
-^.*\.Rproj$
+^Ssynthdid\.Rproj$
 ^\.Rproj\.user$
-^experiments
-^tests/benchmarks
-^vignettes
-^azure-pipelines\.yml$
+^LICENSE\.md$
 ^_pkgdown\.yml$
 ^docs$
 ^pkgdown$
-^DEVELOPING\.md$
-^data/README\.md$
+README.Rmd

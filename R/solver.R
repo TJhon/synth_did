@@ -1,9 +1,12 @@
 contract3 = function(X, v) {
-  stopifnot(length(dim(X)) == 3, dim(X)[3] == length(v))
-  out = array(0, dim = dim(X)[1:2])
+  # same size
+  X1 <- X[[1]]
+  n <- nrow(X1)
+  t <- ncol(X1)
+  out <- matrix(0, nrow = n, ncol = t)
   if (length(v) == 0) { return(out) }
   for (ii in 1:length(v)) {
-    out = out + v[ii] * X[, , ii]
+    out = out + v[ii] * X[[ii]]
   }
   return(out)
 }
@@ -37,7 +40,7 @@ sc.weight.fw = function(Y, zeta, intercept = TRUE, lambda = NULL, min.decrease =
   }
 
   t = 0
-  vals = rep(NA, max.iter)
+  vals = c() #rep(NA, max.iter)
   A = Y[, 1:T0]
   b = Y[, T0 + 1]
   eta = N0 * Re(zeta^2)
@@ -46,7 +49,8 @@ sc.weight.fw = function(Y, zeta, intercept = TRUE, lambda = NULL, min.decrease =
     lambda.p = fw.step(A, lambda, b, eta)
     lambda = lambda.p
     err = Y[1:N0, ] %*% c(lambda, -1)
-    vals[t] = Re(zeta^2) * sum(lambda^2) + sum(err^2) / N0
+    vals_t <- Re(zeta^2) * sum(lambda^2) + sum(err^2) / N0
+    vals <- append(vals, vals_t)
   }
   list(lambda = lambda, vals = vals)
 }
@@ -58,13 +62,13 @@ sc.weight.fw.covariates = function(Y, X = array(0, dim = c(dim(Y), 0)), zeta.lam
                                    lambda.intercept = TRUE, omega.intercept = TRUE,
                                    min.decrease = 1e-3, max.iter = 1000,
                                    lambda = NULL, omega = NULL, beta = NULL, update.lambda = TRUE, update.omega = TRUE) {
-  stopifnot(length(dim(Y)) == 2, length(dim(X)) == 3, all(dim(Y) == dim(X)[1:2]), all(is.finite(Y)), all(is.finite(X)))
+  # stopifnot(length(dim(Y)) == 2, length(dim(X)) == 3, all(dim(Y) == dim(X)[1:2]), all(is.finite(Y)), all(is.finite(X)))
   T0 = ncol(Y) - 1
   N0 = nrow(Y) - 1
-  if (length(dim(X)) == 2) { dim(X) = c(dim(X), 1) }
+  # if (length(dim(X)) == 2) { dim(X) = c(dim(X), 1) }
   if (is.null(lambda)) {  lambda = rep(1 / T0, T0)   }
   if (is.null(omega)) {  omega = rep(1 / N0, N0)    }
-  if (is.null(beta)) {  beta = rep(0, dim(X)[3]) }
+  if (is.null(beta)) {  beta = rep(0, length(X)) }
 
   update.weights = function(Y, lambda, omega) {
     Y.lambda = if (lambda.intercept) { apply(Y[1:N0, ], 2, function(row) { row - mean(row) }) } else { Y[1:N0, ] }
@@ -79,25 +83,32 @@ sc.weight.fw.covariates = function(Y, X = array(0, dim = c(dim(Y), 0)), zeta.lam
     list(val = val, lambda = lambda, omega = omega, err.lambda = err.lambda, err.omega = err.omega)
   }
 
-  vals = rep(NA, max.iter)
+  # vals = rep(NA, max.iter)
+  vals <- c()
   t = 0
   Y.beta = Y - contract3(X, beta)
   weights = update.weights(Y.beta, lambda, omega)
+  g_beta <- function(Xi){
+    t(weights$err.lambda) %*% Xi[1:N0, ] %*% c(weights$lambda, -1) / N0 +
+      t(weights$err.omega) %*% t(Xi[, 1:T0]) %*% c(weights$omega, -1) / T0
+  }
   # state is kept in weights$lambda, weights$omega, beta
   while (t < max.iter && (t < 2 || vals[t - 1] - vals[t] > min.decrease^2)) {
     t = t + 1
-    grad.beta = -if (dim(X)[3] == 0) { c() } else {
-      apply(X, 3, function(Xi) {
-        t(weights$err.lambda) %*% Xi[1:N0, ] %*% c(weights$lambda, -1) / N0 +
-          t(weights$err.omega) %*% t(Xi[, 1:T0]) %*% c(weights$omega, -1) / T0
-      })
-    }
+    # grad.beta = -if (dim(X)[3] == 0) { c() } else {
+    #   apply(X, 3, function(Xi) {
+    #     t(weights$err.lambda) %*% Xi[1:N0, ] %*% c(weights$lambda, -1) / N0 +
+    #       t(weights$err.omega) %*% t(Xi[, 1:T0]) %*% c(weights$omega, -1) / T0
+    #   })
+    # }
+    grad.beta <- purrr::map_dbl(X, g_beta)
 
     alpha = 1 / t
     beta = beta - alpha * grad.beta
     Y.beta = Y - contract3(X, beta)
     weights = update.weights(Y.beta, weights$lambda, weights$omega)
-    vals[t] = weights$val
+    vals <- append(vals, weights$val)
+    # vals[t] = weights$val
   }
   list(lambda = weights$lambda, omega = weights$omega, beta = beta, vals = vals)
 }

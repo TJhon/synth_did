@@ -1,27 +1,27 @@
-Package: synthdid
-Title: Synthetic Difference-in-Difference Estimation
-Version: 0.0.9
-Author: Dmitry Arkhangelsky [aut]
-        Susan Athey [aut]
-        David A. Hirshberg [aut, cre]
-        Guido W. Imbens [aut]
-        Stefan Wager [aut]
-Maintainer: David A. Hirshberg <david.a.hirshberg@gmail.com>
-Description: Estimate average treatment effects in panel data.
-    Currently provides methods only for the case that all treated units
-    adopt treatment at the same time.
-Depends:
-    R (>= 3.4)
-Imports:
-    mvtnorm
-License: GPL (>= 2) | BSD_3_clause + file LICENSE
+Package: Ssynthdid
+Title: Staggered Synthetic Difference-in-Difference Estimation
+Version: 0.1.0.0
+Authors@R: 
+    person("Jhon", "Flores Rojas", , "fr.jhonk@gmail.com", role = c("aut", "cre"),
+           comment = c(ORCID = "0009-0007-0621-1625"))
+Description: Implementation of Synthetic Difference-in-Differences estimation for staggered treatment adoption.
+License: MIT + file LICENSE
 Encoding: UTF-8
-LazyData: true
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.1.1
-Suggests:
-    testthat,
-    ggplot2,
-    CVXR
-URL: https://github.com/synth-inference/synthdid
-BugReports: https://github.com/synth-inference/synthdid/issues
+RoxygenNote: 7.0.0
+Depends:
+  R (>= 4.1)
+Imports: 
+    dplyr (>= 1.0.1),
+    forcats,
+    ggplot2 (>= 3.3.0),
+    magrittr,
+    purrr (>= 1.0.1),
+    readr,
+    rlang,
+    tibble (>= 3.0.0),
+    tidyr (>= 1.0.0)
+Suggests: 
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr

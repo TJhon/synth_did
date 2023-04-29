@@ -1,129 +1,156 @@
+
+
+jackknife_se <- function(estimate) {
+  data_ref <- estimate$data_ref
+  time_break <- estimate$att_table$time
+  uniqID <- unique(data_ref$unit)
+
+  if(any(estimate$att_table$N1 < 1)){
+    stop("Jackknife standard error needs at least two treated units for each treatment period")
+  }
+
+  N <- length(uniqID)
+
+  total_iter <- expand.grid(id = 1:N, 1:length(time_break))
+
+  weights <- estimate$att_table$weights_sdid
+  lambda_aux <- weights |> purrr::map(purrr::pluck, "lambda")
+  omega_aux <- weights |> purrr::map(purrr::pluck, "omega")
+
+
+  individuos <- total_iter$id
+  times <- total_iter$Var2
+
+  # ind: units, id, time_breaks
+
+  theta_jk <- function(ind, id){
+    omega_aux <- (omega_aux |> purrr::pluck(id))[-ind] |> sum_normalize()
+    lambda_aux <- lambda_aux |> purrr::pluck(id)
+    data_aux <- data_ref |>
+      dplyr::filter(unit != uniqID[ind]) |>
+      dplyr::filter(tyear %in% c(0, time_break[id]))
+
+    Y_aux <-
+      data_aux |>
+      dplyr::select(time, unit, outcome) |>
+      tidyr::pivot_wider(names_from = time, values_from = outcome) |>
+      dplyr::select(!unit) |> as.matrix()
+
+    yng <-  data_aux |> dplyr::count(unit) |> nrow()
+    ynt <- data_aux |> dplyr::count(unit) |> dplyr::pull(n) |> min()
+    N1 <- sum(data_aux$tyear == time_break[id]) / ynt
+
+    npre <- data_aux |> dplyr::filter(time < time_break[id]) |> dplyr::count(time) |> nrow()
+    T1 <- ynt - npre
+    tau_wt_aux <- N1 * T1
+    tau_aux <- att_mult(Y_aux, omega_aux, lambda_aux, N1, T1)
+
+    tibble::tibble(unit = uniqID[ind], time = time_break[id], tau_aux = tau_aux[1], tau_wt_aux)
+  }
+
+
+  att_table <- purrr::map2_df(individuos, times, theta_jk, .progress = T)
+
+  result_att <-
+    att_table |> dplyr::arrange(unit) |> dplyr::distinct() |> dplyr::group_by(unit) |>
+    dplyr::mutate(tau_wt = tau_wt_aux / sum(tau_wt_aux), att_aux = tau_aux * tau_wt) |>
+    dplyr::summarise(att_aux = sum(att_aux)) |>
+    dplyr::ungroup()
+
+  se_jackknife <- (((N-1)/N) * (N - 1) * var(result_att$att_aux)) |> sqrt()
+  return(list(result_att, se_jackknife, att_table))
+}
+
+bootstrap_se <- function(estimate, n_reps = 50){
+  data_ref <- estimate$data_ref
+  uniqueID <- data_ref |> dplyr::pull(unit) |> unique()
+
+  theta_bt <- function(n){
+    sample_unit <- sample(uniqueID, replace = T)
+
+    eval_df <- data_ref |> dplyr::filter(unit %in% sample_unit)
+    if(length(unique(eval_df$treatment)) != 2){
+      theta_bt()
+    }
+
+    sample_to_df <- function(id){
+      data_ref |> dplyr::filter(unit == sample_unit[id]) |> dplyr::mutate(unit = paste0(unit, id))
+    }
+
+    sampled_df <- purrr::map_df(1:length(sample_unit), sample_to_df)
+
+    ssynth_estimate(sampled_df, "unit", "time", "treatment", "outcome")$att_estimate
+  }
+
+  att_bt = purrr::map_dbl(1:n_reps, theta_bt, .progress = T)
+
+  se_bootstrap <- (1 / n_reps * sum((att_bt - sum(att_bt / n_reps, na.rm = T)) ^ 2, na.rm = T)) |> sqrt()
+  return(se_bootstrap)
+}
+
+placebo_se <- function(estimate, n_reps = 50){
+  data_ref <- estimate$data_ref
+  tr_years <-
+    data_ref |>
+    dplyr::filter(
+      time == tyear, tyear != 0
+    ) |> dplyr::pull(time)
+  N_tr <- length(tr_years)
+
+  df_co <- data_ref |>
+    dplyr::filter(treated == 0)
+  N_co <- unique(df_co$unit) |> length()
+  N_aux <- N_co -  N_tr
+
+  theta_pb <- function(i){
+    placebo_tibble <- tibble::tibble(unit = sample(unique(df_co$unit), N_tr), tyear1 = tr_years)
+
+    aux_data <-
+      df_co |>
+      dplyr::full_join(placebo_tibble, by = "unit") |>
+      dplyr::mutate(tyear = ifelse(is.na(tyear1), tyear, tyear1))
+
+    aux_data <- aux_data |>
+      dplyr::mutate(
+        treatment = ifelse(
+          tyear != 0 & time == tyear, 1, 0
+        )
+      ) |>
+      # count(treatment)
+      dplyr::group_by(unit) |>
+      dplyr::mutate(tunit = max(treatment)) |>
+      dplyr::ungroup()
+
+    att <- ssynth_estimate(aux_data, "unit", "time", "treatment", "outcome")$att_estimate
+    return(att)
+  }
+
+
+  att_pb <- purrr::map_dbl(1:n_reps, theta_pb, .progress = T)
+
+  placebo_se <- (1 / n_reps * sum((att_pb - sum(att_pb / n_reps, na.rm = T)) ^ 2, na.rm = T)) |> sqrt()
+  return(placebo_se)
+}
+
 #' Calculate Variance-Covariance Matrix for a Fitted Model Object
 #'
-#' Provides variance estimates based on the following three options
+#' Provides variance estimates in the context of staggered adoption based on the following three options.
 #' \itemize{
 #'   \item The bootstrap, Algorithm 2 in Arkhangelsky et al.
 #'   \item The jackknife, Algorithm 3 in Arkhangelsky et al.
 #'   \item Placebo, Algorithm 4 in Arkhangelsky et al.
 #' }
+#' @param estimate A Ssynthdid model
+#' @param method The CI method. The default is "placebo"
+#' @param n_reps the number of replicacions c("placebo", "bootstrap")
 #'
-#' The jackknife is not recommended for SC, see section 5 in Arkhangelsky et al.
-#' "placebo" is the only option that works for only one treated unit.
-#'
-#' @param object A synthdid model
-#' @param method, the CI method. The default is bootstrap (warning: this may be slow on large
-#'  data sets, the jackknife option is the fastest, with the caveat that it is not recommended
-#'  for SC).
-#' @param replications, the number of bootstrap replications
-#' @param ... Additional arguments (currently ignored).
-#'
-#' @references Dmitry Arkhangelsky, Susan Athey, David A. Hirshberg, Guido W. Imbens, and Stefan Wager.
-#'  "Synthetic Difference in Differences". arXiv preprint arXiv:1812.09970, 2019.
-#'
-#' @method vcov synthdid_estimate
 #' @export
-vcov.synthdid_estimate = function(object,
-  method = c("bootstrap", "jackknife", "placebo"),
-  replications = 200, ...) {
-    method = match.arg(method)
-    if(method == 'bootstrap') {
-	se = bootstrap_se(object, replications)
-    } else if(method == 'jackknife') {
-	se = jackknife_se(object)
-    } else if(method == 'placebo') {
-	se = placebo_se(object, replications)
-    }
-    matrix(se^2)
-}
-
-#' Calculate the standard error of a synthetic diff in diff estimate. Deprecated. Use vcov.synthdid_estimate.
-#' @param ... Any valid arguments for vcov.synthdid_estimate
-#' @export synthdid_se
-synthdid_se = function(...) { sqrt(vcov(...)) }
-
-
-# The bootstrap se: Algorithm 2 of Arkhangelsky et al.
-bootstrap_se = function(estimate, replications) { sqrt((replications-1)/replications) * sd(bootstrap_sample(estimate, replications)) }
-bootstrap_sample = function(estimate, replications) {
-    setup = attr(estimate, 'setup')
-    opts = attr(estimate, 'opts')
-    weights = attr(estimate, 'weights')
-    if (setup$N0 == nrow(setup$Y) - 1) { return(NA) }
-    theta = function(ind) {
-	if(all(ind <= setup$N0) || all(ind > setup$N0)) { NA }
-	else {
-	    weights.boot = weights
-	    weights.boot$omega = sum_normalize(weights$omega[sort(ind[ind <= setup$N0])])
-	    do.call(synthdid_estimate, c(list(Y=setup$Y[sort(ind),], N0=sum(ind <= setup$N0), T0=setup$T0, X=setup$X[sort(ind), ,], weights=weights.boot), opts))
-	}
-    }
-    bootstrap.estimates = rep(NA, replications)
-    count = 0
-    while(count < replications) {
-	bootstrap.estimates[count+1] = theta(sample(1:nrow(setup$Y), replace=TRUE))
-	if(!is.na(bootstrap.estimates[count+1])) { count = count+1 }
-    }
-    bootstrap.estimates
-}
-
-
-# The fixed-weights jackknife estimate of variance: Algorithm 3 of Arkhangelsky et al.
-# if weights = NULL is passed explicitly, calculates the usual jackknife estimate of variance.
-# returns NA if there is one treated unit or, for the fixed-weights jackknife, one control with nonzero weight
-jackknife_se = function(estimate, weights = attr(estimate, 'weights')) {
-    setup = attr(estimate, 'setup')
-    opts = attr(estimate, 'opts')
-    if (!is.null(weights)) {
-      opts$update.omega = opts$update.lambda = FALSE
-    }
-    if (setup$N0 == nrow(setup$Y) - 1 || (!is.null(weights) && sum(weights$omega != 0) == 1)) { return(NA) }
-    theta = function(ind) {
-    	weights.jk = weights
-    	if (!is.null(weights)) { weights.jk$omega = sum_normalize(weights$omega[ind[ind <= setup$N0]]) }
-    	estimate.jk = do.call(synthdid_estimate,
-    	    c(list(Y=setup$Y[ind, ], N0=sum(ind <= setup$N0), T0=setup$T0, X = setup$X[ind, , ], weights = weights.jk), opts))
-    }
-    jackknife(1:nrow(setup$Y), theta)
-}
-
-#' Jackknife standard error of function `theta` at samples `x`.
-#' @param x vector of samples
-#' @param theta a function which returns a scalar estimate
-#' @importFrom stats var
-#' @keywords internal
-jackknife = function(x, theta) {
-  n = length(x)
-  u = rep(0, n)
-  for (i in 1:n) {
-    u[i] = theta(x[-i])
+ss_vcov <- function(estimate, method = "placebo", n_reps){
+  if(method == "placebo"){
+    return(placebo_se(estimate, n_reps))
+  }else if (method == "bootstrap"){
+    return(bootstrap_se(estimate, n_reps))
+  }else{
+    return(jackknife_se(estimate))
   }
-  jack.se = sqrt(((n - 1) / n) * (n - 1) * var(u))
-
-  jack.se
-}
-
-
-
-# The placebo se: Algorithm 4 of Arkhangelsky et al.
-placebo_se = function(estimate, replications) {
-    setup = attr(estimate, 'setup')
-    opts = attr(estimate, 'opts')
-    weights = attr(estimate, 'weights')
-    N1 = nrow(setup$Y) - setup$N0
-    if (setup$N0 <= N1) { stop('must have more controls than treated units to use the placebo se') }
-    theta = function(ind) {
-    	N0 = length(ind)-N1
-    	weights.boot = weights
-    	weights.boot$omega = sum_normalize(weights$omega[ind[1:N0]])
-        do.call(synthdid_estimate, c(list(Y=setup$Y[ind,], N0=N0,  T0=setup$T0,  X=setup$X[ind, ,], weights=weights.boot), opts))
-    }
-    sqrt((replications-1)/replications) * sd(replicate(replications, theta(sample(1:setup$N0))))
-}
-
-sum_normalize = function(x) {
-    if(sum(x) != 0) { x / sum(x) }
-    else { rep(1/length(x), length(x)) }
-    # if given a vector of zeros, return uniform weights
-    # this fine when used in bootstrap and placebo standard errors, where it is used only for initialization
-    # for jackknife standard errors, where it isn't, we handle the case of a vector of zeros without calling this function.
 }
